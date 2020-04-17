@@ -1,0 +1,25 @@
+{
+  "name": "@raychee/catalyst-plugin-request",
+  "version": "0.0.1",
+  "description": "request plugin for catalyst",
+  "main": "index.js",
+  "scripts": {
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Raychee/catalyst-plugin-request.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Raychee/catalyst-plugin-request/issues"
+  },
+  "homepage": "https://github.com/Raychee/catalyst-plugin-request#readme",
+  "dependencies": {
+    "@raychee/utils": "^0.1.19",
+    "lodash": "^4.17.15",
+    "request": "^2.88.2",
+    "request-promise-native": "^1.0.8",
+    "uuid": "^7.0.3"
+  }
+}

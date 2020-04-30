@@ -74,11 +74,6 @@ function defaultProcessReturnedFn() {
 
 module.exports = {
     type: 'request',
-    key({defaults, smartError = true, timeout = 0, debug = false, identities, proxies} = {}) {
-        if (!identities && !proxies) {
-            return {defaults, smartError, timeout, debug};
-        }
-    },
     create: async function (
         {
             defaults, smartError = true, timeout = 0, debug = false, identities, proxies,
@@ -154,20 +149,27 @@ module.exports = {
         extra.currentProxy = () => proxy;
         extra.setCurrentIdentity = (newIdentity) => identity = newIdentity;
         extra.setCurrentProxy = (newProxy) => proxy = newProxy;
+        extra.clearIdentity = clearIdentity;
 
         const getReqWithoutIdentities = memoize(defaultIdentityId => {
-            let _req = undefined;
-            return async (...args) => {
-                if (!_req) {
-                    const plugin = await pluginLoader.get({
-                        type: 'request',
-                        defaults, smartError, timeout, debug, proxies,
-                        maxRetryIdentities, switchProxyEvery, switchProxyAfter,
-                        validateProxyFn, defaultIdentityId
-                    });
-                    _req = plugin.instance;
-                }
-                return await _req(...args);
+            let plugin = undefined;
+            return {
+                async instance(...args) {
+                    if (!plugin) {
+                        plugin = await pluginLoader.get({
+                            type: 'request',
+                            defaults, smartError, timeout, debug, proxies,
+                            maxRetryIdentities, switchProxyEvery, switchProxyAfter,
+                            validateProxyFn, defaultIdentityId
+                        });
+                    }
+                    return await plugin.instance(...args);
+                },
+                destroy() {
+                    if (plugin && plugin.destroy) {
+                        return plugin.destroy();
+                    }
+                },
             };
         });
 
@@ -200,10 +202,15 @@ module.exports = {
                     lock: lockIdentityUntilLoaded || lockIdentityInUse,
                     ifAbsent: createIdentityFn && (async () => {
                         const _id = uuid4();
-                        const {id, ...data} = await createIdentityFn.call(logger, getReqWithoutIdentities(_id));
-                        const identity = {id: id || _id, data};
-                        logger.info('New identity for request is created: ', identity.id, ' ', identity.data);
-                        return identity;
+                        const {instance, destroy} = getReqWithoutIdentities(_id);
+                        try {
+                            const {id, ...data} = await createIdentityFn.call(logger, instance);
+                            const identity = {id: id || _id, data};
+                            logger.info('New identity for request is created: ', identity.id, ' ', identity.data);
+                            return identity;
+                        } finally {
+                            await destroy();
+                        }
                     }),
                     waitForStore: !createIdentityFn
                 });
@@ -435,5 +442,8 @@ module.exports = {
 
         return Object.assign(req, extra);
 
+    },
+    async destroy(req) {
+        return req.clearIdentity();
     }
 };

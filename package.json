@@ -1,10 +1,9 @@
 {
   "name": "@raychee/catalyst-plugin-request",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "request plugin for catalyst",
   "main": "index.js",
-  "scripts": {
-  },
+  "scripts": {},
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Raychee/catalyst-plugin-request.git"

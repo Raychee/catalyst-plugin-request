@@ -1,6 +1,6 @@
 const request = require('request-promise-native');
 const uuid4 = require('uuid/v4');
-const {memoize, cloneDeep} = require('lodash');
+const {memoize, cloneDeep, isPlainObject} = require('lodash');
 
 const {dedup, requestWithTimeout, shrink} = require('@raychee/utils');
 
@@ -94,6 +94,7 @@ module.exports = {
             defaultIdentityId,
             loadIdentityError,
             lockIdentityUntilLoaded = false,
+            lockIdentityInUse = false,
             processReturnedFn = defaultProcessReturnedFn,
         } = {},
         {pluginLoader}
@@ -137,11 +138,11 @@ module.exports = {
             }.bind(this, req);
         }
 
-        if (identities && typeof identities === "object" && identities.constructor === Object) {
+        if (isPlainObject(identities)) {
             const plugin = await pluginLoader.get({type: 'identities', ...identities});
             identities = plugin.instance;
         }
-        if (proxies && typeof proxies === "object" && proxies.constructor === Object) {
+        if (isPlainObject(proxies)) {
             const plugin = await pluginLoader.get({type: 'proxies', ...proxies});
             proxies = plugin.instance;
         }
@@ -151,6 +152,8 @@ module.exports = {
         let counter = 0, lastTimeSwitchIdentity = undefined, lastTimeSwitchProxy = undefined;
         extra.currentIdentity = () => identity;
         extra.currentProxy = () => proxy;
+        extra.setCurrentIdentity = (newIdentity) => identity = newIdentity;
+        extra.setCurrentProxy = (newProxy) => proxy = newProxy;
 
         const getReqWithoutIdentities = memoize(defaultIdentityId => {
             let _req = undefined;
@@ -175,6 +178,13 @@ module.exports = {
                 lastTimeSwitchIdentity = Date.now();
             }
         }
+        
+        function clearIdentity() {
+            if (identity && identities && lockIdentityInUse) {
+                identities.unlock(identity);
+                identity = undefined;
+            }
+        }
 
         async function getProxy(...args) {
             const old = proxy;
@@ -187,7 +197,7 @@ module.exports = {
         const launch = dedup(async function (logger) {
             if (identities && !identity) {
                 await getIdentity({
-                    lock: lockIdentityUntilLoaded,
+                    lock: lockIdentityUntilLoaded || lockIdentityInUse,
                     ifAbsent: createIdentityFn && (async () => {
                         const _id = uuid4();
                         const {id, ...data} = await createIdentityFn.call(logger, getReqWithoutIdentities(_id));
@@ -209,36 +219,6 @@ module.exports = {
         req = async function (req, logger, _options) {
             logger = logger || this;
 
-            const now = Date.now();
-            if (identity && counter % switchIdentityEvery === 0) {
-                logger.info(
-                    'Request has been made ', counter, ' times and identity ',
-                    identity.id, ' will be switched before next request.'
-                );
-                identity = undefined;
-            }
-            if (identity && now - lastTimeSwitchIdentity > switchIdentityAfter * 1000) {
-                logger.info(
-                    'Request has been using identity ', identity.id, ' since ', new Date(lastTimeSwitchIdentity),
-                    ' which will be switched before next request.'
-                );
-                identity = undefined;
-            }
-            if (proxy && counter % switchProxyEvery === 0) {
-                logger.info(
-                    'Request has been made ', counter, ' times and proxy ',
-                    proxy, ' will be switched before next request.'
-                );
-                proxy = undefined;
-            }
-            if (proxy && now - lastTimeSwitchProxy > switchProxyAfter * 1000) {
-                logger.info(
-                    'Request has been using proxy ', proxy, ' since ', new Date(lastTimeSwitchProxy),
-                    ' which will be switched before next request.'
-                );
-                proxy = undefined;
-            }
-
             _options = {...defaults, ..._options};
             if (typeof _options.jar === 'boolean' && _options.jar) {
                 _options = {..._options, jar};
@@ -258,16 +238,14 @@ module.exports = {
                             logger, options, identity.data,
                             {request: getReqWithoutIdentities(identity.id)}
                         );
-                        if (loaded) {
+                        if (loaded && identities) {
                             identities.update(identity, loaded);
                         }
                         if (proxies) {
                             await getProxy(identity.id);
                         }
-                        identities.touch(identity);
-                        identities.unlock(identity);
+                        if (identities) identities.touch(identity);
                     } catch (e) {
-                        identities.unlock(identity);
                         if (loadIdentityError) {
                             const message = await loadIdentityError.call(logger, e, options, identity.data);
                             if (message) {
@@ -278,7 +256,7 @@ module.exports = {
                                     ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
                                 );
                                 if (identities) identities.deprecate(identity);
-                                identity = undefined;
+                                clearIdentity();
                                 if (switchProxyOnInvalidIdentity) {
                                     proxy = undefined;
                                 }
@@ -290,9 +268,13 @@ module.exports = {
                             }
                         }
                         throw e;
+                    } finally {
+                        if (identities && lockIdentityUntilLoaded && !lockIdentityInUse) {
+                            identities.unlock(identity);
+                        }
                     }
                 }
-                if (proxy) {
+                if (proxy && proxies) {
                     options.proxy = `http://${proxy}`;
                     proxies.touch(proxy);
                 }
@@ -337,7 +319,7 @@ module.exports = {
                             error
                         }
                     );
-                    if (updated) {
+                    if (updated && identities) {
                         identities.update(identity, updated);
                     }
                 }
@@ -394,11 +376,11 @@ module.exports = {
                     if (proxyInvalidMessage && proxies) {
                         proxies.deprecate(proxy);
                         proxy = undefined;
-                        if (switchIdentityOnInvalidProxy) identity = undefined;
+                        if (switchIdentityOnInvalidProxy) clearIdentity();
                     }
                     if (identityInvalidMessage && identities) {
                         identities.deprecate(identity);
-                        identity = undefined;
+                        clearIdentity();
                         if (switchProxyOnInvalidIdentity) proxy = undefined;
                     }
 
@@ -412,11 +394,41 @@ module.exports = {
                     throw error;
                 }
 
-                counter++;
-
-                if (identity) {
+                if (identity && identities) {
                     identities.renew(identity);
                 }
+
+                counter++;
+                const now = Date.now();
+                if (identity && counter % switchIdentityEvery === 0) {
+                    logger.info(
+                        'Request has been made ', counter, ' times and identity ',
+                        identity.id, ' will be switched before next request.'
+                    );
+                    clearIdentity();
+                }
+                if (identity && now - lastTimeSwitchIdentity > switchIdentityAfter * 1000) {
+                    logger.info(
+                        'Request has been using identity ', identity.id, ' since ', new Date(lastTimeSwitchIdentity),
+                        ' which will be switched before next request.'
+                    );
+                    clearIdentity();
+                }
+                if (proxy && counter % switchProxyEvery === 0) {
+                    logger.info(
+                        'Request has been made ', counter, ' times and proxy ',
+                        proxy, ' will be switched before next request.'
+                    );
+                    proxy = undefined;
+                }
+                if (proxy && now - lastTimeSwitchProxy > switchProxyAfter * 1000) {
+                    logger.info(
+                        'Request has been using proxy ', proxy, ' since ', new Date(lastTimeSwitchProxy),
+                        ' which will be switched before next request.'
+                    );
+                    proxy = undefined;
+                }
+                
                 return response;
             }
         }.bind(this, req);

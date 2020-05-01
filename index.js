@@ -240,10 +240,11 @@ module.exports = {
                     options = cloneDeep(_options);
                 }
                 if (identity) {
+                    const reqWithoutIdentities = getReqWithoutIdentities(identity.id);
                     try {
                         const loaded = await loadIdentityFn.call(
                             logger, options, identity.data,
-                            {request: getReqWithoutIdentities(identity.id)}
+                            {request: reqWithoutIdentities.instance}
                         );
                         if (loaded && identities) {
                             identities.update(identity, loaded);
@@ -276,6 +277,7 @@ module.exports = {
                         }
                         throw e;
                     } finally {
+                        await reqWithoutIdentities.destroy();
                         if (identities && lockIdentityUntilLoaded && !lockIdentityInUse) {
                             identities.unlock(identity);
                         }

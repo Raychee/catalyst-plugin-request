@@ -1,6 +1,6 @@
 {
   "name": "@raychee/catalyst-plugin-request",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "request plugin for catalyst",
   "main": "index.js",
   "scripts": {},
@@ -15,7 +15,7 @@
   },
   "homepage": "https://github.com/Raychee/catalyst-plugin-request#readme",
   "dependencies": {
-    "@raychee/utils": "^0.1.19",
+    "@raychee/utils": "^0.2.3",
     "lodash": "^4.17.15",
     "request": "^2.88.2",
     "request-promise-native": "^1.0.8",

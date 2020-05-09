@@ -2,7 +2,7 @@ const request = require('request-promise-native');
 const uuid4 = require('uuid/v4');
 const {memoize, cloneDeep, isPlainObject} = require('lodash');
 
-const {dedup, requestWithTimeout, shrink} = require('@raychee/utils');
+const {dedup, timeout: withTimeout, shrink} = require('@raychee/utils');
 
 
 /**
@@ -49,9 +49,32 @@ function defaultLoadIdentityFn(options, {cookies, userAgent}) {
     }
 }
 
-function defaultUpdateIdentityFn(options, {identity}) {
-    if (identity.cookies) {
-        if (options.jar) {
+function defaultUpdateIdentityFn(options, {identity, response}) {
+    if (identity && identity.cookies) {
+        if (options.resolveWithFullResponse) {
+            const setCookie = response && response.headers['set-cookie'];
+            if (setCookie && setCookie.length > 0) {
+                const cookies = setCookie.map(c => {
+                    const [[key, value], ...props] = c.split('; ').map(f => f.split('='));
+                    const cookie = {key, value};
+                    for (const [p, v] of props) {
+                        switch (p) {
+                            case 'Path':
+                                cookie.path = v;
+                                break;
+                            case 'Domain':
+                                cookie.domain = v;
+                                break;
+                            case 'Expires':
+                                cookie.expires = v;
+                                break;
+                        }
+                    }
+                    return cookie;
+                });
+                return {...identity, cookies};
+            }
+        } else if (options.jar) {
             let jar = options.jar;
             if (jar._jar) jar = jar._jar;
             const cookies = jar.serializeSync().cookies;
@@ -99,10 +122,17 @@ module.exports = {
         defaults = timeout > 0 ? {timeout: timeout * 1000, ...defaults} : defaults;
 
         if (timeout > 0) {
-            _req = requestWithTimeout(timeout * 1000, _req);
+            _req = withTimeout(_req, timeout * 1000, {
+                error() {
+                    const e = new Error('ETIMEDOUT');
+                    e.code = 'ETIMEDOUT';
+                    e.connect = true;
+                    return e;
+                }
+            });
         }
 
-        let req = async function(logger, options) {
+        let req = async function (logger, options) {
             return await _req(options);
         }
 
@@ -180,7 +210,7 @@ module.exports = {
                 lastTimeSwitchIdentity = Date.now();
             }
         }
-        
+
         function clearIdentity() {
             if (identity && identities && lockIdentityInUse) {
                 identities.unlock(identity);
@@ -437,7 +467,7 @@ module.exports = {
                     );
                     proxy = undefined;
                 }
-                
+
                 return response;
             }
         }.bind(this, req);

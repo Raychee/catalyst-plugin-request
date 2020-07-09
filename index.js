@@ -274,7 +274,7 @@ module.exports = {
                     try {
                         const loaded = await loadIdentityFn.call(
                             logger, options, identity.data,
-                            {request: reqWithoutIdentities.instance}
+                            {request: reqWithoutIdentities.instance, identities, identity, identityId: identity.id}
                         );
                         if (loaded && identities) {
                             identities.update(identity, loaded);
@@ -285,7 +285,9 @@ module.exports = {
                         if (identities) identities.touch(identity);
                     } catch (e) {
                         if (loadIdentityError) {
-                            const message = await loadIdentityError.call(logger, e, options, identity.data);
+                            const message = await loadIdentityError.call(
+                                logger, e, options, identity.data, {identities, identity, identityId: identity.id}
+                            );
                             if (message) {
                                 const logMessages = Array.isArray(message) ? message : [message];
                                 logger.warn(

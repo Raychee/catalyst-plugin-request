@@ -165,11 +165,11 @@ module.exports = {
 
         if (isPlainObject(identities)) {
             const plugin = await pluginLoader.get({type: 'identities', ...identities});
-            identities = plugin.instance;
+            identities = plugin.bound;
         }
         if (isPlainObject(proxies)) {
             const plugin = await pluginLoader.get({type: 'proxies', ...proxies});
-            proxies = plugin.instance;
+            proxies = plugin.bound;
         }
         if (identities) extra.identities = identities;
         if (proxies) extra.proxies = proxies;
@@ -184,7 +184,7 @@ module.exports = {
         const getReqWithoutIdentities = memoize(defaultIdentityId => {
             let plugin = undefined;
             return {
-                async instance(...args) {
+                async bound(...args) {
                     if (!plugin) {
                         plugin = await pluginLoader.get({
                             type: 'request',
@@ -193,7 +193,7 @@ module.exports = {
                             validateProxyFn, defaultIdentityId
                         });
                     }
-                    return await plugin.instance(...args);
+                    return await plugin.bound(...args);
                 },
                 destroy() {
                     if (plugin && plugin.destroy) {
@@ -232,9 +232,9 @@ module.exports = {
                     lock: lockIdentityUntilLoaded || lockIdentityInUse,
                     ifAbsent: createIdentityFn && (async () => {
                         const _id = uuid4();
-                        const {instance, destroy} = getReqWithoutIdentities(_id);
+                        const {bound, destroy} = getReqWithoutIdentities(_id);
                         try {
-                            const {id, ...data} = await createIdentityFn.call(logger, instance);
+                            const {id, ...data} = await createIdentityFn.call(logger, bound);
                             const identity = {id: id || _id, data};
                             logger.info('New identity for request is created: ', identity.id, ' ', identity.data);
                             return identity;
@@ -274,7 +274,7 @@ module.exports = {
                     try {
                         const loaded = await loadIdentityFn.call(
                             logger, options, identity.data,
-                            {request: reqWithoutIdentities.instance, identities, identity, identityId: identity.id}
+                            {request: reqWithoutIdentities.bound, identities, identity, identityId: identity.id}
                         );
                         if (loaded && identities) {
                             identities.update(identity, loaded);

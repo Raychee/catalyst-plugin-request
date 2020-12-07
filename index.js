@@ -1,6 +1,6 @@
 const request = require('request-promise-native');
 const uuid4 = require('uuid/v4');
-const {memoize, cloneDeep, isPlainObject} = require('lodash');
+const {memoize, cloneDeep, isPlainObject, isEmpty} = require('lodash');
 
 const {dedup, timeout: withTimeout, shrink} = require('@raychee/utils');
 
@@ -97,6 +97,10 @@ function defaultProcessReturnedFn() {
 
 module.exports = {
     type: 'request',
+    key({defaults, smartError = true, timeout = 0, debug = false, ...rest}) {
+        if (!isEmpty(rest)) return;
+        return {defaults, smartError, timeout, debug};
+    },
     create: async function (
         {
             defaults, smartError = true, timeout = 0, debug = false, identities, proxies,
@@ -114,7 +118,7 @@ module.exports = {
             lockIdentityUntilLoaded = false,
             lockIdentityInUse = false,
             processReturnedFn = defaultProcessReturnedFn,
-        } = {},
+        },
         {pluginLoader}
     ) {
 
@@ -134,33 +138,6 @@ module.exports = {
 
         let req = async function (logger, options) {
             return await _req(options);
-        }
-
-        if (smartError) {
-            req = async function (req, logger, options) {
-                logger = logger || this;
-                try {
-                    return await req(logger, options);
-                } catch (e) {
-                    if (e.statusCode) {
-                        if (e.statusCode >= 400 && e.statusCode < 500) {
-                            logger.crash('_request_status_4xx', e);
-                        } else {
-                            logger.fail('_request_status_5xx', e);
-                        }
-                    }
-                    if (e.cause) {
-                        if (e.cause.code === 'ETIMEDOUT') {
-                            logger.fail('_request_timeout', e);
-                        } else if (e.cause.code === 'ECONNREFUSED') {
-                            logger.fail('_request_connection_refused', e);
-                        } else if (e.cause.code === 'ECONNRESET') {
-                            logger.fail('_request_connection_reset', e);
-                        }
-                    }
-                    throw e;
-                }
-            }.bind(this, req);
         }
 
         if (isPlainObject(identities)) {
@@ -193,7 +170,7 @@ module.exports = {
                             validateProxyFn, defaultIdentityId
                         });
                     }
-                    return await plugin.bound(...args);
+                    return plugin.bound(...args);
                 },
                 destroy() {
                     if (plugin && plugin.destroy) {
@@ -473,6 +450,33 @@ module.exports = {
                 return response;
             }
         }.bind(this, req);
+        
+        if (smartError) {
+            req = async function (req, logger, options) {
+                logger = logger || this;
+                try {
+                    return await req(logger, options);
+                } catch (e) {
+                    if (e.statusCode) {
+                        if (e.statusCode >= 400 && e.statusCode < 500) {
+                            logger.crash('_request_status_4xx', e);
+                        } else {
+                            logger.fail('_request_status_5xx', e);
+                        }
+                    }
+                    if (e.cause) {
+                        if (e.cause.code === 'ETIMEDOUT') {
+                            logger.fail('_request_timeout', e);
+                        } else if (e.cause.code === 'ECONNREFUSED') {
+                            logger.fail('_request_connection_refused', e);
+                        } else if (e.cause.code === 'ECONNRESET') {
+                            logger.fail('_request_connection_reset', e);
+                        }
+                    }
+                    throw e;
+                }
+            }.bind(this, req);
+        }
 
         return Object.assign(req, extra);
 

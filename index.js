@@ -1,5 +1,5 @@
 const request = require('request-promise-native');
-const uuid4 = require('uuid/v4');
+const {v4: uuid4} = require('uuid');
 const {memoize, cloneDeep, isPlainObject, isEmpty} = require('lodash');
 
 const {dedup, timeout: withTimeout, shrink} = require('@raychee/utils');
@@ -109,6 +109,7 @@ module.exports = {
             switchIdentityAfter, switchProxyAfter,
             switchIdentityOnInvalidProxy = false, switchProxyOnInvalidIdentity = true,
             createIdentityFn,
+            createIdentityError,
             loadIdentityFn = defaultLoadIdentityFn,
             updateIdentityFn = defaultUpdateIdentityFn,
             validateIdentityFn = defaultValidateIdentityFn,
@@ -138,6 +139,23 @@ module.exports = {
 
         let req = async function (logger, options) {
             return await _req(options);
+        }
+
+        if (createIdentityFn && (isPlainObject(identities) || !identities)) {
+            identities = {
+                async createIdentityFn() {
+                    const _id = uuid4();
+                    const {bound, destroy} = getReqWithoutIdentities(_id);
+                    try {
+                        const {id, ...data} = await createIdentityFn.call(this, bound);
+                        return {id: id || _id, data};
+                    } finally {
+                        await destroy();
+                    }
+                },
+                createIdentityError,
+                ...identities
+            };
         }
 
         if (isPlainObject(identities)) {
@@ -203,24 +221,9 @@ module.exports = {
             }
         }
 
-        const launch = dedup(async function (logger) {
+        const launch = dedup(async function () {
             if (identities && !identity) {
-                await getIdentity({
-                    lock: lockIdentityUntilLoaded || lockIdentityInUse,
-                    ifAbsent: createIdentityFn && (async () => {
-                        const _id = uuid4();
-                        const {bound, destroy} = getReqWithoutIdentities(_id);
-                        try {
-                            const {id, ...data} = await createIdentityFn.call(logger, bound);
-                            const identity = {id: id || _id, data};
-                            logger.info('New identity for request is created: ', identity.id, ' ', identity.data);
-                            return identity;
-                        } finally {
-                            await destroy();
-                        }
-                    }),
-                    waitForStore: !createIdentityFn
-                });
+                await getIdentity({lock: lockIdentityUntilLoaded || lockIdentityInUse});
             }
             if (proxies) {
                 const identityId = identity && identity.id || defaultIdentityId;
@@ -241,7 +244,7 @@ module.exports = {
             while (true) {
                 trial++;
                 if (identities && !identity || proxies && !proxy) {
-                    await launch(logger);
+                    await launch();
                 }
                 if (identity || proxy) {
                     options = cloneDeep(_options);

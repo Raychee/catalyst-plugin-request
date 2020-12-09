@@ -97,13 +97,14 @@ function defaultProcessReturnedFn() {
 
 module.exports = {
     type: 'request',
-    key({defaults, smartError = true, timeout = 0, debug = false, ...rest}) {
+    key({smartError = true, timeout = 0, debug = false, type, ...rest}) {
         if (!isEmpty(rest)) return;
-        return {defaults, smartError, timeout, debug};
+        return {smartError, timeout, debug};
     },
     create: async function (
         {
-            defaults, smartError = true, timeout = 0, debug = false, identities, proxies,
+            defaults, smartError = true, timeout = 0, debug = false, 
+            identities: identitiesOptions, proxies: proxiesOptions,
             maxRetryIdentities = 10,
             switchIdentityEvery, switchProxyEvery,
             switchIdentityAfter, switchProxyAfter,
@@ -141,8 +142,8 @@ module.exports = {
             return await _req(options);
         }
 
-        if (createIdentityFn && (isPlainObject(identities) || !identities)) {
-            identities = {
+        if (createIdentityFn) {
+            identitiesOptions = {
                 async createIdentityFn() {
                     const _id = uuid4();
                     const {bound, destroy} = getReqWithoutIdentities(_id);
@@ -154,20 +155,14 @@ module.exports = {
                     }
                 },
                 createIdentityError,
-                ...identities
+                ...identitiesOptions
             };
         }
 
-        if (isPlainObject(identities)) {
-            const plugin = await pluginLoader.get({type: 'identities', ...identities});
-            identities = plugin.bound;
-        }
-        if (isPlainObject(proxies)) {
-            const plugin = await pluginLoader.get({type: 'proxies', ...proxies});
-            proxies = plugin.bound;
-        }
-        if (identities) extra.identities = identities;
-        if (proxies) extra.proxies = proxies;
+        const identities = identitiesOptions && await pluginLoader.get({type: 'identities', ...identitiesOptions});
+        const proxies = proxiesOptions && await await pluginLoader.get({type: 'proxies', ...proxiesOptions});
+        if (identities) extra.identities = identities.bound;
+        if (proxies) extra.proxies = proxies.bound;
         let identity = undefined, proxy = undefined;
         let counter = 0, lastTimeSwitchIdentity = undefined, lastTimeSwitchProxy = undefined;
         extra.currentIdentity = () => identity;
@@ -175,6 +170,23 @@ module.exports = {
         extra.setCurrentIdentity = (newIdentity) => identity = newIdentity;
         extra.setCurrentProxy = (newProxy) => proxy = newProxy;
         extra.clearIdentity = clearIdentity;
+        extra._unload = async (job) => {
+            if (identities) {
+                await identities.unload(job);
+            }
+            if (proxies) {
+                await proxies.unload(job);
+            }
+        };
+        extra._destroy = async () => {
+            clearIdentity();
+            if (identities) {
+                await identities.destroy();
+            }
+            if (proxies) {
+                await proxies.destroy();
+            }
+        }
 
         const getReqWithoutIdentities = memoize(defaultIdentityId => {
             let plugin = undefined;
@@ -183,7 +195,7 @@ module.exports = {
                     if (!plugin) {
                         plugin = await pluginLoader.get({
                             type: 'request',
-                            defaults, smartError, timeout, debug, proxies,
+                            defaults, smartError, timeout, debug, proxies: proxiesOptions,
                             maxRetryIdentities, switchProxyEvery, switchProxyAfter,
                             validateProxyFn, defaultIdentityId
                         });
@@ -200,7 +212,7 @@ module.exports = {
 
         async function getIdentity(...args) {
             const old = identity;
-            identity = await identities.get(...args);
+            identity = await identities.bound.get(...args);
             if ((old && old.id) !== (identity && identity.id)) {
                 lastTimeSwitchIdentity = Date.now();
             }
@@ -208,14 +220,14 @@ module.exports = {
 
         function clearIdentity() {
             if (identity && identities && lockIdentityInUse) {
-                identities.unlock(identity);
+                identities.bound.unlock(identity);
                 identity = undefined;
             }
         }
 
         async function getProxy(...args) {
             const old = proxy;
-            proxy = await proxies.get(...args);
+            proxy = await proxies.bound.get(...args);
             if (old !== proxy) {
                 lastTimeSwitchProxy = Date.now();
             }
@@ -254,19 +266,23 @@ module.exports = {
                     try {
                         const loaded = await loadIdentityFn.call(
                             logger, options, identity.data,
-                            {request: reqWithoutIdentities.bound, identities, identity, identityId: identity.id}
+                            {
+                                request: reqWithoutIdentities.bound, identities: identities && identities.bound, 
+                                identity, identityId: identity.id
+                            }
                         );
                         if (loaded && identities) {
-                            identities.update(identity, loaded);
+                            identities.bound.update(identity, loaded);
                         }
                         if (proxies) {
                             await getProxy(identity.id);
                         }
-                        if (identities) identities.touch(identity);
+                        if (identities) identities.bound.touch(identity);
                     } catch (e) {
                         if (loadIdentityError) {
                             const message = await loadIdentityError.call(
-                                logger, e, options, identity.data, {identities, identity, identityId: identity.id}
+                                logger, e, options, identity.data, 
+                                {identities: identities && identities.bound, identity, identityId: identity.id}
                             );
                             if (message) {
                                 const logMessages = Array.isArray(message) ? message : [message];
@@ -275,7 +291,7 @@ module.exports = {
                                     proxy || 'no proxy', ' / ', identity.id || 'no identity',
                                     ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
                                 );
-                                if (identities) identities.deprecate(identity);
+                                if (identities) identities.bound.deprecate(identity);
                                 clearIdentity();
                                 if (switchProxyOnInvalidIdentity) {
                                     proxy = undefined;
@@ -291,13 +307,13 @@ module.exports = {
                     } finally {
                         await reqWithoutIdentities.destroy();
                         if (identities && lockIdentityUntilLoaded && !lockIdentityInUse) {
-                            identities.unlock(identity);
+                            identities.bound.unlock(identity);
                         }
                     }
                 }
                 if (proxy && proxies) {
                     options.proxy = `http://${proxy}`;
-                    proxies.touch(proxy);
+                    proxies.bound.touch(proxy);
                 }
                 let response, error, proxyInvalidMessage, identityInvalidMessage;
                 try {
@@ -316,10 +332,10 @@ module.exports = {
                     }
                 }
                 const processed = await processReturnedFn.call(logger, options, {
-                    identities,
+                    identities: identities && identities.bound,
                     identityId: (identity || {}).id,
                     identity: (identity || {}).data,
-                    proxies,
+                    proxies: proxies && proxies.bound,
                     proxy,
                     response,
                     error
@@ -331,26 +347,26 @@ module.exports = {
                 if (identity) {
                     const updated = await updateIdentityFn.call(
                         logger, options, {
-                            identities,
+                            identities: identities && identities.bound,
                             identityId: identity.id,
                             identity: identity.data,
-                            proxies,
+                            proxies: proxies && proxies.bound,
                             proxy,
                             response,
                             error
                         }
                     );
                     if (updated && identities) {
-                        identities.update(identity, updated);
+                        identities.bound.update(identity, updated);
                     }
                 }
                 if (proxy) {
                     proxyInvalidMessage = await validateProxyFn.call(
                         logger, options, {
-                            identities,
+                            identities: identities && identities.bound,
                             identityId: (identity || {}).id,
                             identity: (identity || {}).data,
-                            proxies,
+                            proxies: proxies && proxies.bound,
                             proxy,
                             response,
                             error
@@ -360,10 +376,10 @@ module.exports = {
                 if (identity) {
                     identityInvalidMessage = await validateIdentityFn.call(
                         logger, options, {
-                            identities,
+                            identities: identities && identities.bound,
                             identityId: identity.id,
                             identity: identity.data,
-                            proxies,
+                            proxies: proxies && proxies.bound,
                             proxy,
                             response,
                             error
@@ -395,12 +411,12 @@ module.exports = {
                     }
 
                     if (proxyInvalidMessage && proxies) {
-                        proxies.deprecate(proxy);
+                        proxies.bound.deprecate(proxy);
                         proxy = undefined;
                         if (switchIdentityOnInvalidProxy) clearIdentity();
                     }
                     if (identityInvalidMessage && identities) {
-                        identities.deprecate(identity);
+                        identities.bound.deprecate(identity);
                         clearIdentity();
                         if (switchProxyOnInvalidIdentity) proxy = undefined;
                     }
@@ -416,7 +432,7 @@ module.exports = {
                 }
 
                 if (identity && identities) {
-                    identities.renew(identity);
+                    identities.bound.renew(identity);
                 }
 
                 counter++;
@@ -484,7 +500,10 @@ module.exports = {
         return Object.assign(req, extra);
 
     },
+    async unload(req, job) {
+        await req._unload(job);
+    },
     async destroy(req) {
-        return req.clearIdentity();
+        await req._destroy();
     }
 };

@@ -16,7 +16,7 @@
   "homepage": "https://github.com/Raychee/catalyst-plugin-request#readme",
   "dependencies": {
     "@raychee/utils": "^0.2.29",
-    "lodash": "^4.17.15",
+    "lodash": "^4.17.20",
     "request": "^2.88.2",
     "request-promise-native": "^1.0.8",
     "uuid": "^7.0.3"

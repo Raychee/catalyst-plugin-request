@@ -101,9 +101,9 @@ module.exports = {
         if (!isEmpty(rest)) return;
         return {smartError, timeout, debug};
     },
-    create: async function (
+    async create(
         {
-            defaults, smartError = true, timeout = 0, debug = false, 
+            defaults, smartError = true, timeout = 0, debug = false,
             identities: identitiesOptions, proxies: proxiesOptions,
             maxRetryIdentities = 10,
             switchIdentityEvery, switchProxyEvery,
@@ -160,7 +160,7 @@ module.exports = {
         }
 
         const identities = identitiesOptions && await pluginLoader.get({type: 'identities', ...identitiesOptions});
-        const proxies = proxiesOptions && await await pluginLoader.get({type: 'proxies', ...proxiesOptions});
+        const proxies = proxiesOptions && await pluginLoader.get({type: 'proxies', ...proxiesOptions});
         if (identities) extra.identities = identities.bound;
         if (proxies) extra.proxies = proxies.bound;
         let identity = undefined, proxy = undefined;
@@ -267,7 +267,7 @@ module.exports = {
                         const loaded = await loadIdentityFn.call(
                             logger, options, identity.data,
                             {
-                                request: reqWithoutIdentities.bound, identities: identities && identities.bound, 
+                                request: reqWithoutIdentities.bound, identities: identities && identities.bound,
                                 identity, identityId: identity.id
                             }
                         );
@@ -281,7 +281,7 @@ module.exports = {
                     } catch (e) {
                         if (loadIdentityError) {
                             const message = await loadIdentityError.call(
-                                logger, e, options, identity.data, 
+                                logger, e, options, identity.data,
                                 {identities: identities && identities.bound, identity, identityId: identity.id}
                             );
                             if (message) {
@@ -469,7 +469,7 @@ module.exports = {
                 return response;
             }
         }.bind(this, req);
-        
+
         if (smartError) {
             req = async function (req, logger, options) {
                 logger = logger || this;

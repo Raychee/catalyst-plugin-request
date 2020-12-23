@@ -14,7 +14,7 @@ function defaultLoadIdentityFn(options, {cookies, userAgent}) {
             cookies = cookies.split('; ').map(cookie => {
                 const [key, value] = cookie.split('=');
                 if (key == null) {
-                    this.crash('_request_default_load_identity_error', 'invalid cookie: ', cookie);
+                    this.crash('plugin_request_default_load_identity_error', 'invalid cookie: ', cookie);
                 }
                 return {key, value};
             });
@@ -31,12 +31,12 @@ function defaultLoadIdentityFn(options, {cookies, userAgent}) {
                     creation: creation || new Date().toISOString()
                 });
                 if (ret.key == null) {
-                    this.crash('_request_default_load_identity_error', 'invalid cookie: ', cookie);
+                    this.crash('plugin_request_default_load_identity_error', 'invalid cookie: ', cookie);
                 }
                 return ret;
             })
         } else {
-            this.crash('_request_default_load_identity_error', 'invalid cookies: ', cookies);
+            this.crash('plugin_request_default_load_identity_error', 'invalid cookies: ', cookies);
         }
         const headers = options.headers || {};
         options.headers = headers;
@@ -279,28 +279,35 @@ module.exports = {
                         }
                         if (identities) identities.bound.touch(identity);
                     } catch (e) {
-                        if (loadIdentityError) {
-                            const message = await loadIdentityError.call(
-                                logger, e, options, identity.data,
-                                {identities: identities && identities.bound, identity, identityId: identity.id}
+                        let message = undefined;
+                        if (e instanceof Error && e.name === 'JobRuntime') {
+                            message = [e];
+                        } else if (loadIdentityError) {
+                            try {
+                                message = await loadIdentityError.call(
+                                    logger, e, options, identity.data,
+                                    {identities: identities && identities.bound, identity, identityId: identity.id}
+                                );  
+                            } catch (ee) {
+                                logger.warn('Another error occurred in loadIdentityError(): ', ee);
+                            }
+                        }
+                        if (message) {
+                            const logMessages = Array.isArray(message) ? message : [message];
+                            logger.warn(
+                                'Loading identity failed with ',
+                                proxy || 'no proxy', ' / ', identity.id || 'no identity',
+                                ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
                             );
-                            if (message) {
-                                const logMessages = Array.isArray(message) ? message : [message];
-                                logger.warn(
-                                    'Loading identity failed with ',
-                                    proxy || 'no proxy', ' / ', identity.id || 'no identity',
-                                    ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
-                                );
-                                if (identities) identities.bound.deprecate(identity);
-                                clearIdentity();
-                                if (switchProxyOnInvalidIdentity) {
-                                    proxy = undefined;
-                                }
-                                if (trial <= maxRetryIdentities) {
-                                    continue;
-                                } else {
-                                    logger.fail('_request_load_identity_failed', ...logMessages);
-                                }
+                            if (identities) identities.bound.deprecate(identity);
+                            clearIdentity();
+                            if (switchProxyOnInvalidIdentity) {
+                                proxy = undefined;
+                            }
+                            if (trial <= maxRetryIdentities) {
+                                continue;
+                            } else {
+                                logger.fail('plugin_request_load_identity_failed', ...logMessages);
                             }
                         }
                         throw e;
@@ -424,7 +431,7 @@ module.exports = {
                     if (trial <= maxRetryIdentities) {
                         continue;
                     } else {
-                        logger.fail('_request_failed', ...logMessages);
+                        logger.fail('plugin_request_failed', ...logMessages);
                     }
                 }
                 if (error) {
@@ -478,18 +485,18 @@ module.exports = {
                 } catch (e) {
                     if (e.statusCode) {
                         if (e.statusCode >= 400 && e.statusCode < 500) {
-                            logger.crash('_request_status_4xx', e);
+                            logger.crash('plugin_request_status_4xx', e);
                         } else {
-                            logger.fail('_request_status_5xx', e);
+                            logger.fail('plugin_request_status_5xx', e);
                         }
                     }
                     if (e.cause) {
                         if (e.cause.code === 'ETIMEDOUT') {
-                            logger.fail('_request_timeout', e);
+                            logger.fail('plugin_request_timeout', e);
                         } else if (e.cause.code === 'ECONNREFUSED') {
-                            logger.fail('_request_connection_refused', e);
+                            logger.fail('plugin_request_connection_refused', e);
                         } else if (e.cause.code === 'ECONNRESET') {
-                            logger.fail('_request_connection_reset', e);
+                            logger.fail('plugin_request_connection_reset', e);
                         }
                     }
                     throw e;

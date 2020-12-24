@@ -1,6 +1,6 @@
 const request = require('request-promise-native');
 const {v4: uuid4} = require('uuid');
-const {memoize, cloneDeep, isPlainObject, isEmpty} = require('lodash');
+const {cloneDeep, isEmpty} = require('lodash');
 
 const {dedup, timeout: withTimeout, shrink} = require('@raychee/utils');
 
@@ -229,9 +229,11 @@ module.exports = {
             identity = undefined;
         }
 
-        async function getProxy(logger, ...args) {
+        async function getProxy(logger, identity_) {
             const old = proxy;
-            proxy = await proxies.instance.get(logger, ...args);
+            proxy = await proxies.instance.get(
+                logger, identity_, identities && identities.instance.getProxiesOptions()
+            );
             if (old !== proxy) {
                 lastTimeSwitchProxy = Date.now();
             }
@@ -242,9 +244,9 @@ module.exports = {
                 await getIdentity(logger, {lock: lockIdentityUntilLoaded || lockIdentityInUse});
             }
             if (proxies) {
-                const identityId = identity && identity.id || defaultIdentityId;
-                if (!proxy || identityId) {
-                    await getProxy(logger, identityId);
+                const identity_ = {id: defaultIdentityId, ...identity};
+                if (!proxy || identity_.id) {
+                    await getProxy(logger, identity_);
                 }
             }
         }, {key: null});
@@ -279,12 +281,14 @@ module.exports = {
                             }
                         );
                         if (loaded && identities) {
-                            identities.instance.update(logger, identity, loaded);
+                            identity = identities.instance.update(logger, identity, loaded);
                         }
                         if (proxies) {
-                            await getProxy(logger, identity.id);
+                            await getProxy(logger, identity);
                         }
-                        if (identities) identities.instance.touch(logger, identity);
+                        if (identities) {
+                            identity = identities.instance.touch(logger, identity);
+                        }
                     } catch (e) {
                         let message = undefined;
                         if (e instanceof Error && e.name === 'JobRuntime') {
@@ -309,7 +313,9 @@ module.exports = {
                                 proxy || 'no proxy', ' / ', identity.id || 'no identity',
                                 ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
                             );
-                            if (identities) identities.instance.deprecate(logger, identity);
+                            if (identities) {
+                                identities.instance.deprecate(logger, identity);
+                            }
                             clearIdentity(logger);
                             if (switchProxyOnInvalidIdentity) {
                                 proxy = undefined;
@@ -324,7 +330,7 @@ module.exports = {
                     } finally {
                         await reqWithoutIdentities.destroy();
                         if (identities && lockIdentityUntilLoaded && !lockIdentityInUse) {
-                            identities.instance.unlock(logger, identity);
+                            identity = identities.instance.unlock(logger, identity);
                         }
                     }
                 }
@@ -374,7 +380,7 @@ module.exports = {
                         }
                     );
                     if (updated && identities) {
-                        identities.instance.update(logger, identity, updated);
+                        identity = identities.instance.update(logger, identity, updated);
                     }
                 }
                 if (proxy) {
@@ -449,7 +455,7 @@ module.exports = {
                 }
 
                 if (identity && identities) {
-                    identities.instance.renew(logger, identity);
+                    identity = identities.instance.renew(logger, identity);
                 }
 
                 counter++;

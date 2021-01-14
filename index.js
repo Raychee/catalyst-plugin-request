@@ -108,7 +108,7 @@ module.exports = {
             maxRetryIdentities = 10,
             switchIdentityEvery, switchProxyEvery,
             switchIdentityAfter, switchProxyAfter,
-            switchIdentityOnInvalidProxy = false, switchProxyOnInvalidIdentity = true,
+            switchIdentityOnInvalidProxy = false, 
             createIdentityFn,
             createIdentityError,
             loadIdentityFn = defaultLoadIdentityFn,
@@ -217,6 +217,13 @@ module.exports = {
                 lastTimeSwitchIdentity = Date.now();
             }
         }
+        
+        function deprecateIdentity(logger, identity) {
+            const {id, removed} = identities.instance.deprecate(logger, identity) || {};
+            if (removed && proxies && id) {
+                proxies.instance.clearIdentity(logger, id);
+            }
+        }
 
         function clearIdentity(logger) {
             if (identity && identities && lockIdentityInUse) {
@@ -314,12 +321,10 @@ module.exports = {
                                 ' during request trial ', trial, '/', maxRetryIdentities, ': ', ...logMessages
                             );
                             if (identities) {
-                                identities.instance.deprecate(logger, identity);
+                                deprecateIdentity(logger, identity);
                             }
                             clearIdentity(logger);
-                            if (switchProxyOnInvalidIdentity) {
-                                proxy = undefined;
-                            }
+                            proxy = undefined;
                             if (trial <= maxRetryIdentities) {
                                 continue;
                             } else {
@@ -439,9 +444,9 @@ module.exports = {
                         if (switchIdentityOnInvalidProxy) clearIdentity(logger);
                     }
                     if (identityInvalidMessage && identities) {
-                        identities.instance.deprecate(logger, identity);
+                        deprecateIdentity(logger, identity);
                         clearIdentity(logger);
-                        if (switchProxyOnInvalidIdentity) proxy = undefined;
+                        proxy = undefined;
                     }
 
                     if (trial <= maxRetryIdentities) {

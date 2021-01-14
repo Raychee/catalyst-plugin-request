@@ -1,6 +1,6 @@
 {
   "name": "@raychee/catalyst-plugin-request",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "request plugin for catalyst",
   "main": "index.js",
   "scripts": {},
